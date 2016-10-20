@@ -3,6 +3,7 @@
 import argparse
 import json
 import math
+import csv
 
 from imposm.parser import OSMParser
 
@@ -17,9 +18,20 @@ args = parser.parse_args()
 allNodes = dict()
 allEdges = set()
 allCoords = dict()
+allKeys = dict()
 
 vertFile = open(args.vertex + '.json', 'w')
 edgeFile = open(args.edge + '.json', 'w')
+
+with open('mapping.csv', 'r') as csvfile:
+  mapping = csv.reader(csvfile, delimiter=',', quotechar='\\')
+
+  for row in mapping:
+    allKeys[int(row[0])] = row[1]
+
+csvfile.close()
+
+mapFile = open('mapping.csv', 'a')
 
 prefix = args.vertex + '/'
 
@@ -50,9 +62,16 @@ def vertices(elems):
         if allNodes[osmid] < 2:
             continue
 
+        if osmid not in allKeys:
+            key = args.state + ':' + str(osmid)
+            allKeys[osmid] = key
+            mapFile.write(str(osmid) + ',' + key + '\n')
+        else:
+            continue
+
         obj = dict()
         obj['coord'] = coord
-        obj['_key'] = 'K' + str(osmid)
+        obj['_key'] = allKeys[osmid]
         obj['state'] = args.state
 
         if 'highway' in attr:
@@ -63,8 +82,6 @@ def vertices(elems):
                 obj[k] = attr[k]
 
         vertFile.write(json.dumps(obj) + '\n')
-
-        allNodes[osmid] = 0
 
 def distance(lat1, lon1, lat2, lon2):
     dlon = lon2 - lon1
@@ -100,9 +117,16 @@ def coords(elems):
         if allNodes[osmid] < 2:
             continue
 
+        if osmid not in allKeys:
+            key = args.state + ':' + str(osmid)
+            allKeys[osmid] = key
+            mapFile.write(str(osmid) + ',' + key + '\n')
+        else:
+            continue
+
         obj = dict()
         obj['coord'] = (lon, lat)
-        obj['_key'] = 'K' + str(osmid)
+        obj['_key'] = allKeys[osmid]
         obj['state'] = args.state
         obj['type'] = 'coord'
 
@@ -133,8 +157,8 @@ def edges(elems):
             if allNodes[ref] > 1:
                 obj = dict();
                 obj['state'] = args.state
-                obj['_from'] = prefix + 'K' + str(first)
-                obj['_to'] = prefix + 'K' + str(ref)
+                obj['_from'] = prefix + allKeys[first]
+                obj['_to'] = prefix + allKeys[ref]
                 obj['miles'] = miles
 
                 for k in [ 'name', 'lanes', 'access', 'oneway', 'bridge' ]:
