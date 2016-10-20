@@ -1,0 +1,21 @@
+#!/usr/bin/env python
+
+import argparse
+import json
+import math
+
+from imposm.parser import OSMParser
+
+parser = argparse.ArgumentParser()
+parser.add_argument('file')
+
+args = parser.parse_args()
+
+def coords(elems):
+    for osmid, lon, lat in elems:
+        print osmid
+
+C = 1
+
+p = OSMParser(concurrency=C, coords_callback=coords)
+p.parse(args.file)
