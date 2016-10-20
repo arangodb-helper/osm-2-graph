@@ -1,9 +1,10 @@
 #!/usr/bin/env python
 
 import argparse
+import csv
 import json
 import math
-import csv
+import os
 
 from imposm.parser import OSMParser
 
@@ -18,22 +19,51 @@ args = parser.parse_args()
 allNodes = dict()
 allEdges = set()
 allCoords = dict()
-allKeys = dict()
+seenNodes = dict()
+seenEdges = set()
 
-vertFile = open(args.vertex + '.json', 'w')
-edgeFile = open(args.edge + '.json', 'w')
+vertFile = open(args.vertex + '-' + args.state + '.json', 'w')
+edgeFile = open(args.edge + '-' + args.state + '.json', 'w')
 
-with open('mapping.csv', 'r') as csvfile:
-  mapping = csv.reader(csvfile, delimiter=',', quotechar='\\')
+if os.path.isfile('mapping.csv'):
+    with open('mapping.csv', 'r') as csvfile:
+        mapping = csv.reader(csvfile, delimiter=',', quotechar='\\')
 
-  for row in mapping:
-    allKeys[int(row[0])] = row[1]
+        for row in mapping:
+            if row[0] == 'N':
+                seenNodes[int(row[1])] = row[2]
+            elif row[0] == 'E':
+                seenEdges.add(int(row[1]))
 
-csvfile.close()
+    csvfile.close()
 
 mapFile = open('mapping.csv', 'a')
 
 prefix = args.vertex + '/'
+
+def distance(lat1, lon1, lat2, lon2):
+    dlon = lon2 - lon1
+    dlat = lat2 - lat1
+    lat1 = math.radians(lat1)
+    lon1 = math.radians(lon1)
+    lat2 = math.radians(lat2)
+    lon2 = math.radians(lon2)
+    dlon = math.radians(dlon)
+    dlat = math.radians(dlat)
+    r = 6378137
+    a = math.pow(math.sin(dlat/2),2) + math.cos(lat1)*math.cos(lat2)*math.pow(math.sin(dlon/2))
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+    return c * r
+
+def distanceInMiles(slat, slon, dlat, dlon):
+    earthRadius = 3958.75
+    xlat = math.radians(dlat - slat)
+    xlon = math.radians(dlon - slon)
+    sindLat = math.sin(xlat / 2)
+    sindLon = math.sin(xlon / 2)
+    a = math.pow(sindLat, 2) + math.pow(sindLon, 2) * math.cos(math.radians(slat)) * math.cos(math.radians(dlat))
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return earthRadius * c
 
 def ways(elems):
     for osmid, tags, refs in elems:
@@ -62,16 +92,17 @@ def vertices(elems):
         if allNodes[osmid] < 2:
             continue
 
-        if osmid not in allKeys:
+        if osmid not in seenNodes:
             key = args.state + ':' + str(osmid)
-            allKeys[osmid] = key
-            mapFile.write(str(osmid) + ',' + key + '\n')
+            seenNodes[osmid] = key
+            mapFile.write('N,' + str(osmid) + ',' + key + ',N,' + args.state + '\n')
         else:
             continue
 
         obj = dict()
+        obj['_key'] = seenNodes[osmid]
+        obj['osmid'] = osmid
         obj['coord'] = coord
-        obj['_key'] = allKeys[osmid]
         obj['state'] = args.state
 
         if 'highway' in attr:
@@ -83,30 +114,6 @@ def vertices(elems):
 
         vertFile.write(json.dumps(obj) + '\n')
 
-def distance(lat1, lon1, lat2, lon2):
-    dlon = lon2 - lon1
-    dlat = lat2 - lat1
-    lat1 = math.radians(lat1)
-    lon1 = math.radians(lon1)
-    lat2 = math.radians(lat2)
-    lon2 = math.radians(lon2)
-    dlon = math.radians(dlon)
-    dlat = math.radians(dlat)
-    r = 6378137
-    a = math.pow(math.sin(dlat/2),2) + math.cos(lat1)*math.cos(lat2)*math.pow(math.sin(dlon/2))
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
-    return c * r
-
-def distanceInMiles(slat, slon, dlat, dlon):
-    earthRadius = 3958.75
-    xlat = math.radians(dlat - slat)
-    xlon = math.radians(dlon - slon)
-    sindLat = math.sin(xlat / 2)
-    sindLon = math.sin(xlon / 2)
-    a = math.pow(sindLat, 2) + math.pow(sindLon, 2) * math.cos(math.radians(slat)) * math.cos(math.radians(dlat))
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    return earthRadius * c
-
 def coords(elems):
     for osmid, lon, lat in elems:
         allCoords[osmid] = (lon, lat)
@@ -117,16 +124,17 @@ def coords(elems):
         if allNodes[osmid] < 2:
             continue
 
-        if osmid not in allKeys:
+        if osmid not in seenNodes:
             key = args.state + ':' + str(osmid)
-            allKeys[osmid] = key
-            mapFile.write(str(osmid) + ',' + key + '\n')
+            seenNodes[osmid] = key
+            mapFile.write('N,' + str(osmid) + ',' + key + ',C,' + args.state + '\n')
         else:
             continue
 
         obj = dict()
+        obj['_key'] = seenNodes[osmid]
         obj['coord'] = (lon, lat)
-        obj['_key'] = allKeys[osmid]
+        obj['osmid'] = osmid
         obj['state'] = args.state
         obj['type'] = 'coord'
 
@@ -136,6 +144,12 @@ def edges(elems):
     for osmid, tags, refs in elems:
         if osmid not in allEdges:
             continue
+
+        if osmid in seenEdges:
+            continue
+
+        seenEdges.add(osmid)
+        mapFile.write('E,' + str(osmid) + ',' + args.state + '\n')
 
         first = None
         left = None
@@ -156,10 +170,14 @@ def edges(elems):
 
             if allNodes[ref] > 1:
                 obj = dict();
+                obj['_from'] = prefix + seenNodes[first]
+                obj['_to'] = prefix + seenNodes[ref]
                 obj['state'] = args.state
-                obj['_from'] = prefix + allKeys[first]
-                obj['_to'] = prefix + allKeys[ref]
+                obj['osmid'] = osmid
                 obj['miles'] = miles
+
+                if 'highway' in tags:
+                    obj['type'] = tags['highway']
 
                 for k in [ 'name', 'lanes', 'access', 'oneway', 'bridge' ]:
                     if k in tags:
@@ -178,5 +196,8 @@ p1.parse(args.file)
 p2 = OSMParser(concurrency=C, nodes_callback=vertices)
 p2.parse(args.file)
 
-p3 = OSMParser(concurrency=C, coords_callback=coords, ways_callback=edges)
+p3 = OSMParser(concurrency=C, coords_callback=coords)
 p3.parse(args.file)
+
+p4 = OSMParser(concurrency=C, ways_callback=edges)
+p4.parse(args.file)
