@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import math
 
 from imposm.parser import OSMParser
 
@@ -15,6 +16,7 @@ args = parser.parse_args()
 
 allNodes = dict()
 allEdges = set()
+allCoords = dict()
 
 vertFile = open(args.vertex + '.json', 'w')
 edgeFile = open(args.edge + '.json', 'w')
@@ -64,8 +66,34 @@ def vertices(elems):
 
         allNodes[osmid] = 0
 
+def distance(lat1, lon1, lat2, lon2):
+    dlon = lon2 - lon1
+    dlat = lat2 - lat1
+    lat1 = math.radians(lat1)
+    lon1 = math.radians(lon1)
+    lat2 = math.radians(lat2)
+    lon2 = math.radians(lon2)
+    dlon = math.radians(dlon)
+    dlat = math.radians(dlat)
+    r = 6378137
+    a = math.pow(math.sin(dlat/2),2) + math.cos(lat1)*math.cos(lat2)*math.pow(math.sin(dlon/2))
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+    return c * r
+
+def distanceInMiles(slat, slon, dlat, dlon):
+    earthRadius = 3958.75
+    xlat = math.radians(dlat - slat)
+    xlon = math.radians(dlon - slon)
+    sindLat = math.sin(xlat / 2)
+    sindLon = math.sin(xlon / 2)
+    a = math.pow(sindLat, 2) + math.pow(sindLon, 2) * math.cos(math.radians(slat)) * math.cos(math.radians(dlat))
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return earthRadius * c
+
 def coords(elems):
     for osmid, lon, lat in elems:
+        allCoords[osmid] = (lon, lat)
+
         if osmid not in allNodes:
             continue
 
@@ -86,17 +114,28 @@ def edges(elems):
             continue
 
         first = None
+        left = None
+        right = None
+        miles = 0
 
         for ref in refs:
             if first == None:
                 first = ref
+                left = allCoords[ref]
                 continue
+
+            right = allCoords[ref]
+            dist = distanceInMiles(left[0], left[1], right[0], right[1])
+            miles += dist
+
+            left = right
 
             if allNodes[ref] > 1:
                 obj = dict();
                 obj['state'] = args.state
                 obj['_from'] = prefix + 'K' + str(first)
                 obj['_to'] = prefix + 'K' + str(ref)
+                obj['miles'] = miles
 
                 for k in [ 'name', 'lanes', 'access', 'oneway', 'bridge' ]:
                     if k in tags:
@@ -105,6 +144,7 @@ def edges(elems):
                 edgeFile.write(json.dumps(obj) + '\n')
 
                 first = ref
+                miles = 0
 
 C = 1
 
